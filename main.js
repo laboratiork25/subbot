@@ -43,7 +43,8 @@ const {
 const PHONENUMBER_MCC = PHONENUMBER_MCC_RAW ?? {};
 
 // helper E.164: 6–15 cifre, no +, prima cifra 1–9
-const isE164Digits = (s) => /^[1-9]\d{5,14}$/.test(s); // richiesto da Baileys per pairing
+const isE164Digits = (s) => /^[1-9]\d{5,14}$/.test(s);
+
 // prefissi paese fallback se PHONENUMBER_MCC mancante
 const CC_PREFIXES = [
   '1','7','20','27','30','31','32','33','34','36','39','40','41','43','44','45','46','47','48','49',
@@ -153,7 +154,7 @@ loadChatgptDB();
 global.authFile = `Sessioni`;
 const { state, saveCreds } = await useMultiFileAuthState(global.authFile);
 const msgRetryCounterMap = (MessageRetryMap) => {};
-const msgRetryCounterCache = new NodeCache(); // import e istanza corretti [ESM]
+const msgRetryCounterCache = new NodeCache();
 const { version } = await fetchLatestBaileysVersion();
 let phoneNumber = global.botnumber;
 
@@ -161,16 +162,20 @@ const methodCodeQR = process.argv.includes("qr");
 const methodCode = !!phoneNumber || process.argv.includes("code");
 const MethodMobile = process.argv.includes("mobile");
 
+// readline aperta una volta sola, chiusa dopo ultimo input
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (texto) => new Promise((resolver) => rl.question(texto, resolver));
 let opcion;
+
 if (methodCodeQR) {
   opcion = '1';
 }
 if (!methodCodeQR && !methodCode && !fs.existsSync(`./${authFile}/creds.json`)) {
-  do {
+  let valid = false;
+  while (!valid) {
     let lineM = '⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ ⋯ 》';
-    opcion = await question(`╭${lineM}
+    opcion = await question(
+      `╭${lineM}
 ┊ ${chalk.blueBright('╭┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅')}
 ┊ ${chalk.blueBright('┊')} ${chalk.blue.bgBlue.bold.cyan('METODO DI COLLEGAMENTO')}
 ┊ ${chalk.blueBright('╰┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅')}
@@ -183,14 +188,20 @@ if (!methodCodeQR && !methodCode && !fs.existsSync(`./${authFile}/creds.json`)) 
 ┊ ${chalk.blueBright('┊')} ${chalk.bold.redBright(`⇢  Opzione 1:`)} ${chalk.greenBright('Codice qr')}
 ┊ ${chalk.blueBright('┊')} ${chalk.bold.redBright(`⇢  Opzione 2:`)} ${chalk.greenBright('Codice 8 caratteri')}
 ┊ ${chalk.blueBright('╰┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅')}
-╰${lineM}\n${chalk.bold.magentaBright('---> ')}`);
-    if (!/^[1-2]$/.test(opcion)) {
+╰${lineM}\n${chalk.bold.magentaBright('---> ')}`
+    );
+    if (/^[1-2]$/.test(opcion)) {
+      valid = true;
+    } else {
       console.log(chalk.bold.redBright('Opzione non valida. Inserisci solo 1 o 2.'));
+      process.exit(1);
     }
-  } while (opcion !== '1' && opcion !== '2' || fs.existsSync(`./${authFile}/creds.json`));
+  }
+  // NON chiudere il readline qui
 }
 
-console.info = () => {};
+console.info = () => { };
+
 const connectionOptions = {
   logger: pino({ level: 'silent' }),
   printQRInTerminal: opcion == '1' ? true : methodCodeQR ? true : false,
@@ -209,7 +220,7 @@ const connectionOptions = {
     let msg = await store.loadMessage(jid, clave.id);
     return msg?.message || "";
   },
-  msgRetryCounterCache, // ora esiste
+  msgRetryCounterCache,
   msgRetryCounterMap,
   decodeJid: (jid) => {
     if (!jid) return jid;
@@ -243,10 +254,10 @@ if (!fs.existsSync(`./${authFile}/creds.json`)) {
           if (isE164Digits(numeroTelefono) && hasKnownCC(numeroTelefono)) break;
           console.log(chalk.bgBlack(chalk.bold.redBright(`Inserisci il numero WhatsApp in formato E.164 senza +\nEsempio: +39 333 333 3333 -> 393333333333\n`)));
         }
-        rl.close();
+        rl.close(); // chiuso solo dopo ultimo input
       }
       setTimeout(async () => {
-        let codigo = await conn.requestPairingCode(numeroTelefono); // E.164 senza +
+        let codigo = await conn.requestPairingCode(numeroTelefono);
         codigo = codigo?.match(/.{1,4}/g)?.join("-") || codigo;
         console.log(chalk.yellowBright('Collega il bot...'));
         console.log(chalk.black(chalk.bgCyanBright(`INSERISCI QUESTO CODICE:`)), chalk.black(chalk.bgGreenBright(codigo)));
@@ -510,6 +521,7 @@ global.reload = async (_ev, filename) => {
 };
 Object.freeze(global.reload);
 watch(pluginFolder, global.reload);
+
 await global.reloadHandler();
 
 async function _quickTest() {
