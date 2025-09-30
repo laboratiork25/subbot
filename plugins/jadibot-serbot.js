@@ -57,7 +57,8 @@ ${SEP}
 
 ${BOTTOM}`
 
-if (!(global.conns instanceof Array)) global.conns = []
+if (!(global.conns instanceof Array)) global.conns = [] // [web:22]
+if (!Array.isArray(global.delowner)) global.delowner = [] // lista owner globale (array di JIDs) [web:22]
 
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms))
 
@@ -122,6 +123,25 @@ let handler = async (m, { conn, args, usedPrefix, command }) => {
     let sock = makeWASocket(sockConfig)
     sock.isInit = false
     let codeSent = false
+    let ownerSet = false // evita duplicazioni [web:22]
+
+    async function ensureOwner(jid) {
+      try {
+        if (!jid) return
+        const norm = String(jid).includes('@') ? jid : `${jid}@s.whatsapp.net` // normalizza JID [web:41]
+        const exists = global.delowner.findIndex(e => e[0] === norm) !== -1
+        if (!exists) {
+          global.delowner.push([norm])
+          try {
+            await conn.sendMessage(
+              m.chat,
+              { text: `${TOP}\n👑 Proprietario impostato automaticamente: @${norm.split('@')[0]}\n${BOTTOM}`, mentions: [norm] },
+              { quoted: m }
+            )
+          } catch {}
+        }
+      } catch {}
+    }
 
     async function onConnectionUpdate(update) {
       const { connection, lastDisconnect, isNewLogin, qr } = update
@@ -140,10 +160,10 @@ let handler = async (m, { conn, args, usedPrefix, command }) => {
 
       if ((connection === 'connecting' || qr) && wantCode && !sock.authState.creds.registered && !codeSent) {
         try {
-          codeSent = true // [web:15][web:9]
+          codeSent = true // [web:9][web:15]
           await conn.sendMessage(m.chat, { text: CAPTION_CODE }, { quoted: m })
           await sleep(1200)
-          const phone = String(m.sender.split('@')[0]).replace(/\D/g, '') // E.164 senza + [web:9][web:22]
+          const phone = String(m.sender.split('@')[0]).replace(/\D/g, '') // E.164 senza + [web:9]
           const code = await sock.requestPairingCode(phone) // [web:22][web:9]
           await conn.sendMessage(
             m.chat,
@@ -159,6 +179,14 @@ let handler = async (m, { conn, args, usedPrefix, command }) => {
       }
 
       if (connection === 'open') {
+        try {
+          // imposta automaticamente owner = account collegato
+          const meJid = sock?.user?.id || sock?.user?.jid // JID dell'account SubBot [web:22][web:41]
+          if (meJid && !ownerSet) {
+            ownerSet = true
+            await ensureOwner(meJid)
+          }
+        } catch {}
         sock.isInit = true
         global.conns.push(sock)
         await conn.sendMessage(
