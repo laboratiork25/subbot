@@ -3,13 +3,15 @@ import {
   DisconnectReason,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion
-} from '@realvare/based'
-import qrcode from 'qrcode'
+} from '@realvare/based' // [web:22][web:26]
+
+import qrcode from 'qrcode' // [web:9]
 import NodeCache from 'node-cache'
 import fs from 'fs'
 import path from 'path'
 import pino from 'pino'
 import * as ws from 'ws'
+
 import { makeWASocket } from '../lib/simple.js'
 
 const JADI_DIR = 'jadibts'
@@ -17,6 +19,7 @@ const CMD_NAME = ['collegabot', 'jadibot']
 const TAGS = ['serbot']
 const HELP = ['serbot']
 const PRIVATE_ONLY = true
+
 const BOTNAME = 'chatunity-bot'
 
 const TOP = '╭───────────────⟢'
@@ -34,7 +37,7 @@ ${SEP}
 2. Tocca ⋮ → Dispositivi collegati
 3. Scansiona questo QR
 
-⚠ Il QR scade in 45 secondi
+⚠️ Il QR scade in 45 secondi
 
 ${BOTTOM}`
 
@@ -50,7 +53,7 @@ ${SEP}
 3. Seleziona "Collega con numero di telefono"
 4. Inserisci il codice ricevuto qui
 
-⚠ Questo codice è valido solo per poco tempo
+⚠️ Questo codice è valido solo per poco tempo
 
 ${BOTTOM}`
 
@@ -72,18 +75,19 @@ let handler = async (m, { conn, args, usedPrefix, command }) => {
     return conn.sendMessage(
       m.chat,
       {
-        text: `${TOP}\nScegli come collegare il SubBot:\n${BOTTOM}`,
+        text: `${TOP}\nScegli l'opzione\n${BOTTOM}`,
         buttons: [
-          { buttonId: `${usedPrefix + command} qr`, buttonText: { displayText: '🔳 Collegati con QR' }, type: 1 },
-          { buttonId: `${usedPrefix + command} code`, buttonText: { displayText: '🔑 Collegati con CODE' }, type: 1 }
+          { buttonId: `${usedPrefix + command} qr`, buttonText: { displayText: '🔳 QR' }, type: 1 },
+          { buttonId: `${usedPrefix + command} code`, buttonText: { displayText: '🔑 CODE' }, type: 1 }
         ],
         headerType: 1
       },
       { quoted: m }
-    )
+    ) // [web:24][web:27]
   }
 
   const wantCode = /code/i.test(args[0])
+  const wantQr = /qr/i.test(args[0])
 
   const { bare, userDir } = getUserDirFromMessage(m, conn)
   if (!bare) return m.reply(`${TOP}\nFormato utente non valido.\n${BOTTOM}`)
@@ -92,10 +96,11 @@ let handler = async (m, { conn, args, usedPrefix, command }) => {
   const credsPath = path.join(userDir, 'creds.json')
 
   async function startSubBot() {
-    const { version } = await fetchLatestBaileysVersion()
+    const { version } = await fetchLatestBaileysVersion() // [web:25][web:22]
     const logger = pino({ level: 'silent' })
     const msgRetryCache = new NodeCache()
-    const { state, saveCreds } = await useMultiFileAuthState(userDir)
+
+    const { state, saveCreds } = await useMultiFileAuthState(userDir) // [web:26]
 
     const sockConfig = {
       printQRInTerminal: false,
@@ -106,7 +111,7 @@ let handler = async (m, { conn, args, usedPrefix, command }) => {
       },
       msgRetry: () => {},
       msgRetryCache,
-      syncFullHistory: true,
+      syncFullHistory: true, // [web:22][web:4]
       browser: wantCode
         ? ['Windows', 'Chrome', '114.0.5735.198']
         : [`${BOTNAME} (Sub Bot)`, 'Chrome', '2.0.0'],
@@ -116,24 +121,30 @@ let handler = async (m, { conn, args, usedPrefix, command }) => {
 
     let sock = makeWASocket(sockConfig)
     sock.isInit = false
+    let codeSent = false
 
     async function onConnectionUpdate(update) {
       const { connection, lastDisconnect, isNewLogin, qr } = update
       if (isNewLogin) sock.isInit = false
 
-      if (qr && !wantCode) {
+      if (qr && wantQr) {
         try {
-          const img = await qrcode.toBuffer(qr, { scale: 8 })
-          await conn.sendMessage(m.chat, { image: img, caption: CAPTION_QR }, { quoted: m })
+          const img = await qrcode.toBuffer(qr, { scale: 8 }) // [web:9]
+          await conn.sendMessage(
+            m.chat,
+            { image: img, caption: CAPTION_QR },
+            { quoted: m }
+          )
         } catch {}
       }
 
-      if (connection === 'connecting' && wantCode && !sock.authState.creds.registered) {
+      if ((connection === 'connecting' || qr) && wantCode && !sock.authState.creds.registered && !codeSent) {
         try {
+          codeSent = true // [web:15][web:9]
           await conn.sendMessage(m.chat, { text: CAPTION_CODE }, { quoted: m })
-          await sleep(2000)
-          const phone = String(m.sender.split('@')[0]).replace(/\D/g, '')
-          const code = await sock.requestPairingCode(phone)
+          await sleep(1200)
+          const phone = String(m.sender.split('@')[0]).replace(/\D/g, '') // E.164 senza + [web:9][web:22]
+          const code = await sock.requestPairingCode(phone) // [web:22][web:9]
           await conn.sendMessage(
             m.chat,
             {
@@ -142,6 +153,7 @@ let handler = async (m, { conn, args, usedPrefix, command }) => {
             { quoted: m }
           )
         } catch {
+          codeSent = false
           await m.reply(`${TOP}\n❌ Impossibile generare il codice, riprova.\n${BOTTOM}`)
         }
       }
@@ -149,7 +161,11 @@ let handler = async (m, { conn, args, usedPrefix, command }) => {
       if (connection === 'open') {
         sock.isInit = true
         global.conns.push(sock)
-        await conn.sendMessage(m.chat, { text: `${TOP}\n✅ SubBot connesso con successo!\n${BOTTOM}` }, { quoted: m })
+        await conn.sendMessage(
+          m.chat,
+          { text: `${TOP}\n✅ SubBot connesso con successo!\n${BOTTOM}` },
+          { quoted: m }
+        )
       }
 
       if (connection === 'close') {
@@ -157,24 +173,20 @@ let handler = async (m, { conn, args, usedPrefix, command }) => {
           lastDisconnect?.error?.output?.statusCode ??
           lastDisconnect?.error?.output?.payload?.statusCode
 
-        if (!sock.authState.creds.registered) {
-          console.log('⏳ Chiusura temporanea ignorata (SubBot non ancora registrato).')
-          return
-        }
+        if (!sock.authState.creds.registered) return // [web:26]
 
         if (statusCode === DisconnectReason.loggedOut) {
           if (fs.existsSync(credsPath)) fs.unlinkSync(credsPath)
           await m.reply(`${TOP}\n❌ Sessione scaduta. Esegui di nuovo il comando.\n${BOTTOM}`)
         } else {
-          console.log('🔄 Tentativo di riconnessione SubBot...')
           await sleep(2000)
-          startSubBot()
+          startSubBot() // [web:23]
         }
       }
     }
 
-    sock.ev.on('connection.update', onConnectionUpdate)
-    sock.ev.on('creds.update', saveCreds)
+    sock.ev.on('connection.update', onConnectionUpdate) // [web:26]
+    sock.ev.on('creds.update', saveCreds) // [web:26]
     sock.ev.on('messages.upsert', async (ev) => {
       try {
         const mod = await import('../handler.js?update=' + Date.now())
